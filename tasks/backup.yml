@@ -18,9 +18,17 @@
     group: root
     mode: '0700'
 
+- name: Create scripts directory
+  file:
+    path: /opt/wealthpath/scripts
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
 - name: Deploy backup script
   copy:
-    src: "{{ playbook_dir }}/../scripts/backup-db.sh"
+    src: "{{ playbook_dir }}/scripts/backup-db.sh"
     dest: /opt/wealthpath/scripts/backup-db.sh
     owner: root
     group: root
@@ -28,16 +36,8 @@
 
 - name: Deploy restore script
   copy:
-    src: "{{ playbook_dir }}/../scripts/restore-db.sh"
+    src: "{{ playbook_dir }}/scripts/restore-db.sh"
     dest: /opt/wealthpath/scripts/restore-db.sh
-    owner: root
-    group: root
-    mode: '0755'
-
-- name: Create scripts directory if not exists
-  file:
-    path: /opt/wealthpath/scripts
-    state: directory
     owner: root
     group: root
     mode: '0755'
