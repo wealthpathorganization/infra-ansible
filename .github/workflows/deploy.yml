@@ -38,9 +38,11 @@ jobs:
         run: pip install ansible
       
       - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/wealthpath_key
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/wealthpath_key
           chmod 600 ~/.ssh/wealthpath_key
           ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts 2>/dev/null
       
