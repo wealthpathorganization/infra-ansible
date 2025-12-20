@@ -1,0 +1,29 @@
+---
+# Application Setup Tasks
+# Creates app directory and clones repository
+
+- name: Create app directory
+  file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Add app directory to git safe.directory
+  command: git config --global --add safe.directory {{ app_dir }}
+  changed_when: false
+
+- name: Clone/update repository
+  git:
+    repo: "{{ repo_url }}"
+    dest: "{{ app_dir }}"
+    version: main
+    force: yes
+
+
+
+
+
+
+

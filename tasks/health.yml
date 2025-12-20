@@ -1,0 +1,23 @@
+---
+# Health Check Tasks
+# Verifies services are running correctly
+
+- name: Wait for backend to be ready
+  command: docker exec wealthpath-backend-1 wget -qO- http://localhost:8080/api/health
+  register: backend_health
+  retries: 30
+  delay: 5
+  until: backend_health.rc == 0
+  changed_when: false
+
+- name: Display deployment info
+  debug:
+    msg: |
+      
+      ✅ WealthPath deployed successfully!
+      
+      URL: {{ protocol }}://{{ final_domain }}
+      IP:  {{ server_ip }}
+      
+      SSH: ssh -i ~/.ssh/wealthpath_key ubuntu@{{ server_ip }}
+

@@ -1,0 +1,55 @@
+# WealthPath Ansible Inventory
+# Usage: ansible-playbook -i inventory.yml playbook.yml
+#
+# Required environment variables:
+#   SERVER_IP - Target server IP address
+#   DOMAIN    - Your domain name (e.g., example.com)
+#
+# Optional: Set via environment or GitHub Secrets for CI/CD
+
+all:
+  hosts:
+    wealthpath:
+      ansible_host: "{{ lookup('env', 'SERVER_IP') }}"
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/wealthpath_key
+      ansible_python_interpreter: /usr/bin/python3
+  
+  vars:
+    # App configuration
+    app_name: wealthpath
+    app_dir: /opt/wealthpath
+    repo_url: https://github.com/harnguyen/WealthPath.git
+    
+    # Database
+    postgres_user: wealthpath
+    postgres_db: wealthpath
+    
+    # Domain & SSL (uses Let's Encrypt by default)
+    domain: "{{ lookup('env', 'DOMAIN') }}"
+    use_ssl: "{{ lookup('env', 'USE_SSL') | default('true', true) }}"
+    
+    # OAuth - Google (from GitHub Secrets via env vars)
+    google_client_id: "{{ lookup('env', 'GOOGLE_CLIENT_ID') | default('', true) }}"
+    google_client_secret: "{{ lookup('env', 'GOOGLE_CLIENT_SECRET') | default('', true) }}"
+    
+    # OAuth - Facebook (from GitHub Secrets via env vars)
+    facebook_app_id: "{{ lookup('env', 'FACEBOOK_APP_ID') | default('', true) }}"
+    facebook_app_secret: "{{ lookup('env', 'FACEBOOK_APP_SECRET') | default('', true) }}"
+    
+    # AI (from GitHub Secrets via env vars)
+    openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
+    
+    # SEO & Analytics (from GitHub Secrets via env vars)
+    ga_measurement_id: "{{ lookup('env', 'GA_MEASUREMENT_ID') | default('', true) }}"
+    google_site_verification: "{{ lookup('env', 'GOOGLE_SITE_VERIFICATION') | default('', true) }}"
+    
+    # Docker compose file
+    compose_file: docker-compose.deploy.yaml
+    
+    # Backup configuration (DigitalOcean Spaces)
+    do_spaces_key: "{{ lookup('env', 'DO_SPACES_KEY') | default('', true) }}"
+    do_spaces_secret: "{{ lookup('env', 'DO_SPACES_SECRET') | default('', true) }}"
+    do_spaces_bucket: "{{ lookup('env', 'DO_SPACES_BUCKET') | default('wealthpath-backups', true) }}"
+    do_spaces_region: "{{ lookup('env', 'DO_SPACES_REGION') | default('nyc3', true) }}"
+

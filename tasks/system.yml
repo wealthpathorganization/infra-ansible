@@ -1,0 +1,28 @@
+---
+# System Setup Tasks
+# Installs base packages and updates system
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install required packages
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - git
+      - jq
+      - python3-pip
+      - gnupg
+      - lsb-release
+    state: present
+
+
+
+
+
+
+

@@ -1,0 +1,52 @@
+---
+# Deployment Tasks
+# Pulls Docker images and starts services
+
+- name: Pull Docker images
+  shell: |
+    cd {{ app_dir }}
+    docker compose -f {{ compose_file }} pull --quiet
+  async: 600  # 10 minute timeout
+  poll: 10
+  register: pull_result
+  ignore_errors: yes
+
+- name: Show pull result
+  debug:
+    msg: "Image pull {{ 'succeeded' if pull_result.rc == 0 else 'had issues (continuing anyway)' }}"
+
+- name: Stop and start services atomically
+  shell: |
+    cd {{ app_dir }}
+    # Stop and start in a single command to minimize downtime and connection issues
+    docker compose -f {{ compose_file }} down --remove-orphans --timeout 30 && \
+    docker compose -f {{ compose_file }} up -d --wait --wait-timeout 120
+  async: 300  # 5 minute timeout to prevent indefinite hang
+  poll: 10
+  register: compose_result
+  retries: 2
+  delay: 15
+  until: compose_result.rc == 0
+
+- name: List running containers
+  shell: docker ps --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Ports{{ '}}' }}"
+  register: docker_status
+  changed_when: false
+
+- name: Show container status
+  debug:
+    var: docker_status.stdout_lines
+
+- name: Check admin container logs (if exists)
+  shell: docker logs wealthpath-admin-1 --tail 20 2>&1 || echo "Admin container not found"
+  register: admin_logs
+  changed_when: false
+  ignore_errors: yes
+
+- name: Show admin logs
+  debug:
+    var: admin_logs.stdout_lines
+  when: admin_logs.stdout != "Admin container not found"
+
+
+

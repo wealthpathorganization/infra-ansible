@@ -1,0 +1,67 @@
+---
+# Configuration Tasks
+# Gets server info, sets domain, generates secrets, creates .env
+
+- name: Get public IP (for display only)
+  uri:
+    url: http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address
+    return_content: yes
+  register: public_ip_result
+  ignore_errors: yes
+
+- name: Set public IP fact
+  set_fact:
+    server_ip: "{{ public_ip_result.content | default(ansible_facts['default_ipv4']['address']) }}"
+
+- name: Set final domain
+  set_fact:
+    final_domain: "{{ domain }}"
+    protocol: "{{ 'https' if use_ssl == 'true' else 'http' }}"
+
+- name: Set admin credentials from env vars or secrets.yml
+  set_fact:
+    admin_username: "{{ lookup('env', 'ADMIN_USERNAME') or admin_username | default('admin') }}"
+    admin_password: "{{ lookup('env', 'ADMIN_PASSWORD') or admin_password | default('') }}"
+  no_log: true
+
+- name: Check if .env exists
+  stat:
+    path: "{{ app_dir }}/.env"
+  register: env_file
+
+- name: Generate secrets
+  set_fact:
+    jwt_secret: "{{ lookup('password', '/dev/null length=64 chars=hexdigits') }}"
+    postgres_password: "{{ lookup('password', '/dev/null length=32 chars=hexdigits') }}"
+  when: not env_file.stat.exists and postgres_password is not defined
+  no_log: true
+
+- name: Read existing secrets
+  slurp:
+    src: "{{ app_dir }}/.env"
+  register: existing_env
+  when: env_file.stat.exists
+  no_log: true
+
+- name: Parse existing JWT secret
+  set_fact:
+    jwt_secret: "{{ existing_env.content | b64decode | regex_search('JWT_SECRET=(.+)', '\\1') | first }}"
+  when: env_file.stat.exists and existing_env.content is defined
+  ignore_errors: yes
+  no_log: true
+
+- name: Parse existing Postgres password
+  set_fact:
+    postgres_password: "{{ existing_env.content | b64decode | regex_search('POSTGRES_PASSWORD=(.+)', '\\1') | first }}"
+  when: env_file.stat.exists and existing_env.content is defined
+  ignore_errors: yes
+  no_log: true
+
+- name: Create .env file
+  template:
+    src: templates/env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true

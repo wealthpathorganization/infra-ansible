@@ -1,0 +1,52 @@
+# WealthPath Caddy Configuration
+#
+# Environment variables:
+#   DOMAIN    - Domain name (e.g., wealthpath.duckdns.org)
+#   ACME_EMAIL - Email for certificate registration (optional)
+#
+# Uses Let's Encrypt by default (no configuration needed)
+
+# Main app - wealthpath.duckdns.org
+{$DOMAIN:localhost} {
+    # Admin panel routes (must be before frontend catch-all)
+    @admin path /admin /admin/*
+    reverse_proxy @admin admin:8081
+    
+    # Dozzle log viewer - VPN only
+    # AWS VPN typically uses: 10.0.0.0/8, 172.16.0.0/12
+    # Tailscale uses: 100.64.0.0/10
+    # Adjust these ranges to match your VPN CIDR
+    @logs {
+        path /logs /logs/*
+        remote_ip 10.0.0.0/8 172.16.0.0/12 100.64.0.0/10
+    }
+    reverse_proxy @logs dozzle:8080
+    
+    # Block non-VPN access to /logs
+    handle /logs* {
+        respond "VPN Required" 403
+    }
+    
+    # API routes to backend
+    reverse_proxy /api/* backend:8080
+    
+    # Everything else to frontend
+    reverse_proxy /* frontend:3000
+    
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+    
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+    
+    # Enable compression
+    encode gzip zstd
+}

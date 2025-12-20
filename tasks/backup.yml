@@ -1,0 +1,70 @@
+---
+# Backup Configuration Tasks
+# Installs backup tools and deploys backup/restore scripts
+
+- name: Install backup dependencies
+  apt:
+    name:
+      - s3cmd
+      - gzip
+    state: present
+    update_cache: yes
+
+- name: Create backup directory
+  file:
+    path: /var/backups/wealthpath
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Deploy backup script
+  copy:
+    src: "{{ playbook_dir }}/../scripts/backup-db.sh"
+    dest: /opt/wealthpath/scripts/backup-db.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy restore script
+  copy:
+    src: "{{ playbook_dir }}/../scripts/restore-db.sh"
+    dest: /opt/wealthpath/scripts/restore-db.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create scripts directory if not exists
+  file:
+    path: /opt/wealthpath/scripts
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure s3cmd for DigitalOcean Spaces
+  template:
+    src: templates/s3cfg.j2
+    dest: /root/.s3cfg
+    owner: root
+    group: root
+    mode: '0600'
+  when: do_spaces_key is defined and do_spaces_key
+  no_log: true
+
+- name: Test backup script (dry run)
+  command: /opt/wealthpath/scripts/backup-db.sh --help
+  register: backup_test
+  changed_when: false
+  failed_when: false
+
+- name: Show backup configuration status
+  debug:
+    msg: |
+      Backup configuration complete.
+      - Scripts deployed to /opt/wealthpath/scripts/
+      - Backup directory: /var/backups/wealthpath/
+      - Backups are triggered by GitHub Actions (see .github/workflows/backup-db.yml)
+      - Manual backup: /opt/wealthpath/scripts/backup-db.sh [hourly|daily|weekly]
+      - Restore: /opt/wealthpath/scripts/restore-db.sh [backup_file]
+

@@ -1,0 +1,9 @@
+---
+# Handlers for WealthPath Deployment
+# These are triggered by notify directives in tasks
+
+- name: restart postgresql
+  systemd:
+    name: postgresql
+    state: restarted
+

@@ -1,0 +1,91 @@
+---
+# WealthPath Deployment Playbook
+# Usage: ansible-playbook playbook.yml
+# With vault: ansible-playbook playbook.yml --ask-vault-pass
+#
+# This playbook orchestrates the deployment by importing modular task files.
+# Each task file handles a specific aspect of the deployment.
+
+- name: Deploy WealthPath
+  hosts: wealthpath
+  become: yes
+  
+  vars:
+    docker_compose_version: "2.24.0"
+  
+  pre_tasks:
+    - name: Check if secrets.yml exists
+      local_action: stat path=secrets.yml
+      register: secrets_file
+      become: no
+      failed_when: false
+
+    - name: Include secrets if available (skip if encrypted without vault password)
+      include_vars: secrets.yml
+      when: secrets_file.stat.exists
+      no_log: true
+      ignore_errors: yes
+
+    - name: Check if .env exists on server
+      stat:
+        path: "{{ app_dir }}/.env"
+      register: env_file
+
+    - name: Read existing secrets from .env
+      slurp:
+        src: "{{ app_dir }}/.env"
+      register: existing_env
+      when: env_file.stat.exists
+      no_log: true
+
+    - name: Parse existing Postgres password
+      set_fact:
+        postgres_password: "{{ existing_env.content | b64decode | regex_search('POSTGRES_PASSWORD=(.+)', '\\1') | first }}"
+      when: env_file.stat.exists and existing_env.content is defined
+      ignore_errors: yes
+      no_log: true
+
+    - name: Generate postgres_password if not set
+      set_fact:
+        postgres_password: "{{ lookup('password', '/dev/null length=32 chars=hexdigits') }}"
+      when: postgres_password is not defined
+      no_log: true
+
+  tasks:
+    # System setup - install base packages
+    - name: System Setup
+      import_tasks: tasks/system.yml
+
+    # Docker installation and configuration
+    - name: Docker Installation
+      import_tasks: tasks/docker.yml
+
+    # PostgreSQL installation and configuration
+    - name: PostgreSQL Setup
+      import_tasks: tasks/postgresql.yml
+
+    # Application directory and repository
+    - name: Application Setup
+      import_tasks: tasks/app.yml
+
+    # Configuration - domain, secrets, .env
+    - name: Configuration
+      import_tasks: tasks/config.yml
+
+    # Docker Compose deployment
+    - name: Deploy Application
+      import_tasks: tasks/deploy.yml
+
+    # Health checks and verification
+    - name: Health Checks
+      import_tasks: tasks/health.yml
+
+    # Backup configuration
+    - name: Backup Setup
+      import_tasks: tasks/backup.yml
+
+  handlers:
+    - name: restart postgresql
+      systemd:
+        name: postgresql
+        state: restarted
