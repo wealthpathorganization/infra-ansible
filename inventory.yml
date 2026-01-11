@@ -19,7 +19,7 @@ all:
     # App configuration
     app_name: wealthpath
     app_dir: /opt/wealthpath
-    repo_url: https://github.com/harnguyen/WealthPath.git
+    repo_url: https://github.com/wealthpathorganization/infra-ansible.git
     
     # Database
     postgres_user: wealthpath
