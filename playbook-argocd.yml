@@ -1,0 +1,81 @@
+---
+# ArgoCD and SealedSecrets Installation Playbook
+# Installs ArgoCD and SealedSecrets on k3s cluster for GitOps deployment
+#
+# Usage:
+#   export K3S_DROPLET_IP=$(terraform -chdir=../infra-terraform/k8s output -raw k3s_public_ip)
+#   ansible-playbook -i inventory-k8s.yml playbook-argocd.yml
+#
+# Prerequisites:
+#   - k3s cluster running (from Terraform)
+#   - ansible-galaxy collection install kubernetes.core
+#
+# What this playbook does:
+#   1. Installs ArgoCD with resource limits optimized for small cluster
+#   2. Configures ArgoCD for Traefik TLS termination
+#   3. Creates Traefik IngressRoute for ArgoCD UI
+#   4. Installs SealedSecrets controller via Helm
+#   5. Installs kubeseal CLI
+#   6. Backs up SealedSecrets private key
+#   7. Outputs initial admin password and access instructions
+
+- name: Install ArgoCD and SealedSecrets on k3s
+  hosts: wealthpath-k3s
+  become: true
+
+  vars:
+    # ArgoCD Configuration
+    argocd_version: "v2.13.3"
+    argocd_namespace: "argocd"
+    argocd_domain: "argocd.wealthpath.duckdns.org"
+
+    # SealedSecrets Configuration
+    sealed_secrets_version: "0.27.2"
+
+    # k3s Configuration
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+
+  pre_tasks:
+    - name: Verify k3s is running
+      command: kubectl --kubeconfig={{ kubeconfig_path }} get nodes
+      register: k3s_check
+      changed_when: false
+      failed_when: k3s_check.rc != 0
+
+    - name: Display k3s nodes
+      debug:
+        msg: "{{ k3s_check.stdout_lines }}"
+
+  tasks:
+    - name: Install ArgoCD
+      include_tasks: tasks/argocd.yml
+
+    - name: Install SealedSecrets
+      include_tasks: tasks/sealed-secrets.yml
+
+  post_tasks:
+    - name: Display summary
+      debug:
+        msg: |
+          =========================================
+          ArgoCD Installation Complete!
+          =========================================
+
+          ArgoCD UI: https://{{ argocd_domain }}
+          Username: admin
+
+          Next steps:
+          1. Add DNS record: {{ argocd_domain }} -> {{ ansible_host }}
+          2. Change admin password after first login
+          3. Add your K8s repo to ArgoCD
+          4. Apply ArgoCD Application manifests
+
+          SealedSecrets:
+          - Public cert: /root/sealed-secrets-pub-cert.pem
+          - Private key backup: /root/sealed-secrets-key-backup.yaml
+            (Copy to secure offline storage!)
+
+          To seal a secret locally:
+            scp root@{{ ansible_host }}:/root/sealed-secrets-pub-cert.pem .
+            kubeseal --cert sealed-secrets-pub-cert.pem --format yaml < secret.yaml > sealed-secret.yaml
+          =========================================

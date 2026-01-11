@@ -1,0 +1,38 @@
+# WealthPath K8s Architecture - Ansible Inventory
+# Usage:
+#   PostgreSQL: ansible-playbook -i inventory-k8s.yml playbook-postgresql-k8s.yml
+#   ArgoCD:     ansible-playbook -i inventory-k8s.yml playbook-argocd.yml
+#
+# Required environment variables:
+#   DB_DROPLET_IP      - Database droplet IP (from terraform output)
+#   K3S_DROPLET_IP     - k3s droplet IP (from terraform output)
+#   POSTGRES_PASSWORD  - Password for the wealthpath database user
+
+all:
+  hosts:
+    wealthpath-db:
+      ansible_host: "{{ lookup('env', 'DB_DROPLET_IP') }}"
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      ansible_python_interpreter: /usr/bin/python3
+
+    wealthpath-k3s:
+      ansible_host: "{{ lookup('env', 'K3S_DROPLET_IP') }}"
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      ansible_python_interpreter: /usr/bin/python3
+
+  vars:
+    # PostgreSQL Configuration
+    postgres_user: wealthpath
+    postgres_password: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+    postgres_db: wealthpath
+
+    # VPC Configuration (must match Terraform vpc_cidr)
+    vpc_cidr: "10.116.0.0/20"
+
+    # Listen on all interfaces for VPC access
+    postgres_listen_addresses: "*"
+
+    # SealedSecrets version
+    sealed_secrets_version: "0.27.2"

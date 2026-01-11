@@ -1,0 +1,29 @@
+---
+# PostgreSQL Setup for K8s Architecture
+# Usage: ansible-playbook -i inventory-k8s.yml playbook-postgresql-k8s.yml
+#
+# This playbook configures PostgreSQL on a dedicated droplet for use with k3s.
+# Run this after Terraform creates the infrastructure.
+
+- name: Configure PostgreSQL for K8s
+  hosts: wealthpath-db
+  become: yes
+
+  pre_tasks:
+    - name: Validate required variables
+      fail:
+        msg: "{{ item.name }} is required. Set via environment variable."
+      when: item.value | length == 0
+      loop:
+        - { name: "POSTGRES_PASSWORD", value: "{{ postgres_password | default('') }}" }
+        - { name: "DB_DROPLET_IP", value: "{{ ansible_host | default('') }}" }
+
+  tasks:
+    - name: PostgreSQL Setup
+      import_tasks: tasks/postgresql-k8s.yml
+
+  handlers:
+    - name: restart postgresql
+      systemd:
+        name: postgresql
+        state: restarted

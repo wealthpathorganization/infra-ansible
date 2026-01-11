@@ -1,0 +1,177 @@
+---
+# k3s Installation Tasks
+# Installs k3s with Traefik and Let's Encrypt on a single node
+
+- name: Check if k3s is already installed
+  command: which k3s
+  register: k3s_check
+  changed_when: false
+  failed_when: false
+
+- name: Install k3s
+  when: k3s_check.rc != 0
+  block:
+    - name: Download k3s install script
+      get_url:
+        url: https://get.k3s.io
+        dest: /tmp/k3s-install.sh
+        mode: '0755'
+
+    - name: Install k3s (disable built-in traefik)
+      command: /tmp/k3s-install.sh
+      environment:
+        INSTALL_K3S_EXEC: "--disable traefik --write-kubeconfig-mode 644"
+      async: 300
+      poll: 10
+
+- name: Wait for k3s to be ready
+  command: kubectl --kubeconfig={{ kubeconfig_path }} get nodes
+  register: k3s_nodes
+  until: k3s_nodes.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Display k3s nodes
+  debug:
+    msg: "{{ k3s_nodes.stdout_lines }}"
+
+- name: Wait for CoreDNS to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - k8s-app=kube-dns
+  register: coredns_pods
+  until: >
+    coredns_pods.resources | length > 0 and
+    (coredns_pods.resources | selectattr('status.phase', 'equalto', 'Running') | list | length > 0)
+  retries: 30
+  delay: 10
+
+- name: Install Traefik CRDs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: https://raw.githubusercontent.com/traefik/traefik/v3.0/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+
+- name: Check if Helm is installed
+  command: which helm
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Helm
+  when: helm_check.rc != 0
+  block:
+    - name: Download Helm install script
+      get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0755'
+
+    - name: Run Helm installer
+      command: /tmp/get_helm.sh
+      environment:
+        DESIRED_VERSION: v3.14.0
+
+- name: Add Traefik Helm repo
+  kubernetes.core.helm_repository:
+    name: traefik
+    repo_url: https://traefik.github.io/charts
+
+- name: Install Traefik via Helm
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: traefik
+    chart_ref: traefik/traefik
+    chart_version: "33.0.0"
+    release_namespace: kube-system
+    create_namespace: false
+    values:
+      # Enable dashboard
+      ingressRoute:
+        dashboard:
+          enabled: true
+
+      # Ports configuration (v33+ format)
+      ports:
+        web:
+          port: 8000
+          exposedPort: 80
+          expose:
+            default: true
+          protocol: TCP
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+        websecure:
+          port: 8443
+          exposedPort: 443
+          expose:
+            default: true
+          protocol: TCP
+          tls:
+            enabled: true
+
+      # Let's Encrypt certificate resolver
+      additionalArguments:
+        - "--certificatesresolvers.letsencrypt.acme.email={{ acme_email }}"
+        - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+        - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+        - "--log.level=INFO"
+
+      # Persistence for ACME certificates
+      persistence:
+        enabled: true
+        name: data
+        accessMode: ReadWriteOnce
+        size: 128Mi
+        path: /data
+
+      # Service type
+      service:
+        type: LoadBalancer
+
+      # Resources
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+- name: Wait for Traefik to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: traefik
+    namespace: kube-system
+  register: traefik_deployment
+  until: >
+    traefik_deployment.resources | length > 0 and
+    traefik_deployment.resources[0].status.readyReplicas is defined and
+    traefik_deployment.resources[0].status.readyReplicas >= 1
+  retries: 30
+  delay: 10
+
+- name: Display k3s installation summary
+  debug:
+    msg: |
+      =========================================
+      k3s Installation Complete!
+      =========================================
+
+      k3s nodes:
+      {{ k3s_nodes.stdout }}
+
+      Traefik is installed with Let's Encrypt support.
+      Certificate resolver: letsencrypt
+      ACME email: {{ acme_email }}
+
+      =========================================

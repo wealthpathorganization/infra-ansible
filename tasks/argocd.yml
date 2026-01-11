@@ -1,0 +1,141 @@
+---
+# ArgoCD Installation Tasks
+# Installs ArgoCD with resource limits optimized for small k3s cluster
+
+- name: Create argocd namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ argocd_namespace }}"
+
+- name: Download ArgoCD install manifest
+  get_url:
+    url: "https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml"
+    dest: /tmp/argocd-install.yaml
+    mode: '0644'
+
+- name: Install ArgoCD
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    src: /tmp/argocd-install.yaml
+    namespace: "{{ argocd_namespace }}"
+
+- name: Wait for ArgoCD CRDs to be established
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: applications.argoproj.io
+  register: crd_result
+  until: crd_result.resources | length > 0
+  retries: 30
+  delay: 10
+
+- name: Wait for ArgoCD server deployment to be available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: argocd-server
+    namespace: "{{ argocd_namespace }}"
+  register: argocd_server
+  until: >
+    argocd_server.resources | length > 0 and
+    argocd_server.resources[0].status.availableReplicas is defined and
+    argocd_server.resources[0].status.availableReplicas >= 1
+  retries: 30
+  delay: 10
+
+- name: Apply ArgoCD resource limits
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: "{{ lookup('template', 'argocd-resource-patches.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "Applying resource patches"
+
+- name: Check if argocd-server already has --insecure flag
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: argocd-server
+    namespace: "{{ argocd_namespace }}"
+  register: argocd_server_deployment
+
+- name: Patch ArgoCD server for insecure mode (Traefik handles TLS)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    merge_type: strategic-merge
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: argocd-server
+        namespace: "{{ argocd_namespace }}"
+      spec:
+        template:
+          spec:
+            containers:
+              - name: argocd-server
+                command:
+                  - argocd-server
+                  - --insecure
+  when: "'--insecure' not in (argocd_server_deployment.resources[0].spec.template.spec.containers[0].command | default([]) | join(' '))"
+
+- name: Apply ArgoCD IngressRoute for Traefik
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: "{{ lookup('template', 'argocd-ingress-route.yaml.j2') | from_yaml_all | list }}"
+
+- name: Wait for ArgoCD server to be ready after patches
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: argocd-server
+    namespace: "{{ argocd_namespace }}"
+  register: argocd_server_ready
+  until: >
+    argocd_server_ready.resources | length > 0 and
+    argocd_server_ready.resources[0].status.availableReplicas is defined and
+    argocd_server_ready.resources[0].status.availableReplicas >= 1
+  retries: 30
+  delay: 10
+
+- name: Get ArgoCD initial admin password
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: Secret
+    name: argocd-initial-admin-secret
+    namespace: "{{ argocd_namespace }}"
+  register: argocd_secret
+  ignore_errors: true
+
+- name: Display ArgoCD admin password
+  debug:
+    msg: |
+      =========================================
+      ArgoCD Initial Admin Password:
+      {{ argocd_secret.resources[0].data.password | b64decode }}
+
+      Access ArgoCD at: https://{{ argocd_domain }}
+      Username: admin
+
+      IMPORTANT: Change this password after first login!
+      =========================================
+  when: argocd_secret.resources | length > 0
+
+- name: Install ArgoCD CLI
+  get_url:
+    url: "https://github.com/argoproj/argo-cd/releases/download/{{ argocd_version }}/argocd-linux-amd64"
+    dest: /usr/local/bin/argocd
+    mode: '0755'

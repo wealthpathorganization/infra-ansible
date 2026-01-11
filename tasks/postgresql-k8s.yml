@@ -1,0 +1,174 @@
+---
+# PostgreSQL Setup for K8s Architecture
+# Run after Terraform creates the database droplet
+#
+# This differs from the main postgresql.yml in that:
+# - It only allows VPC connections (not Docker networks)
+# - Uses scram-sha-256 authentication (more secure)
+# - No Docker-related network configuration
+
+# =============================================================================
+# PHASE 1: Installation
+# =============================================================================
+
+- name: Install PostgreSQL packages
+  apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+    update_cache: yes
+
+- name: Start PostgreSQL service
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Wait for PostgreSQL to be ready
+  wait_for:
+    port: 5432
+    host: localhost
+    delay: 5
+    timeout: 60
+
+# =============================================================================
+# PHASE 2: Configuration
+# =============================================================================
+
+- name: Get PostgreSQL major version
+  shell: psql --version | awk '{print $3}' | cut -d. -f1
+  register: postgres_version
+  changed_when: false
+
+- name: Set PostgreSQL config path
+  set_fact:
+    pg_conf_dir: "/etc/postgresql/{{ postgres_version.stdout }}/main"
+
+- name: Configure PostgreSQL to listen on all interfaces
+  lineinfile:
+    path: "{{ pg_conf_dir }}/postgresql.conf"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = '{{ postgres_listen_addresses }}'"
+    state: present
+    backup: yes
+  notify: restart postgresql
+
+- name: Configure max_connections for production
+  lineinfile:
+    path: "{{ pg_conf_dir }}/postgresql.conf"
+    regexp: "^#?max_connections\\s*="
+    line: "max_connections = 100"
+    state: present
+  notify: restart postgresql
+
+- name: Configure shared_buffers for 2GB RAM droplet
+  lineinfile:
+    path: "{{ pg_conf_dir }}/postgresql.conf"
+    regexp: "^#?shared_buffers\\s*="
+    line: "shared_buffers = 512MB"
+    state: present
+  notify: restart postgresql
+
+- name: Configure effective_cache_size
+  lineinfile:
+    path: "{{ pg_conf_dir }}/postgresql.conf"
+    regexp: "^#?effective_cache_size\\s*="
+    line: "effective_cache_size = 1536MB"
+    state: present
+  notify: restart postgresql
+
+# =============================================================================
+# PHASE 3: Authentication (pg_hba.conf)
+# =============================================================================
+
+- name: Allow VPC connections in pg_hba.conf
+  blockinfile:
+    path: "{{ pg_conf_dir }}/pg_hba.conf"
+    block: |
+      # =============================================================================
+      # VPC Access for K8s Pods
+      # Only allows connections from the VPC CIDR (k3s pods, migrations, etc.)
+      # =============================================================================
+      host    all    all    {{ vpc_cidr }}    scram-sha-256
+    marker: "# {mark} ANSIBLE MANAGED - VPC ACCESS FOR K8S"
+    insertafter: "^# IPv4 local connections"
+  notify: restart postgresql
+
+# Flush handlers to apply config before creating database/user
+- name: Flush handlers to apply PostgreSQL config
+  meta: flush_handlers
+
+# =============================================================================
+# PHASE 4: Database Setup
+# =============================================================================
+
+- name: Create PostgreSQL database
+  become_user: postgres
+  postgresql_db:
+    name: "{{ postgres_db }}"
+    encoding: UTF8
+    lc_collate: en_US.UTF-8
+    lc_ctype: en_US.UTF-8
+    template: template0
+    state: present
+
+# =============================================================================
+# PHASE 5: User Setup
+# =============================================================================
+
+- name: Ensure postgres_password is defined
+  fail:
+    msg: "postgres_password is not defined. Set POSTGRES_PASSWORD environment variable."
+  when: postgres_password is not defined or postgres_password | length == 0
+
+- name: Create PostgreSQL user
+  become_user: postgres
+  postgresql_user:
+    name: "{{ postgres_user }}"
+    password: "{{ postgres_password }}"
+    state: present
+  no_log: true
+
+- name: Grant user full access to database
+  become_user: postgres
+  postgresql_privs:
+    database: "{{ postgres_db }}"
+    privs: ALL
+    type: database
+    role: "{{ postgres_user }}"
+    state: present
+
+- name: Grant user schema privileges
+  become_user: postgres
+  postgresql_privs:
+    database: "{{ postgres_db }}"
+    privs: ALL
+    type: schema
+    objs: public
+    role: "{{ postgres_user }}"
+    state: present
+
+# =============================================================================
+# PHASE 6: Verification
+# =============================================================================
+
+- name: Verify PostgreSQL is listening on all interfaces
+  shell: ss -tlnp | grep 5432
+  register: pg_listen
+  changed_when: false
+
+- name: Display PostgreSQL listening status
+  debug:
+    var: pg_listen.stdout_lines
+
+- name: Test database connection
+  become_user: postgres
+  postgresql_ping:
+    db: "{{ postgres_db }}"
+  register: db_ping
+
+- name: Display connection test result
+  debug:
+    msg: "Database '{{ postgres_db }}' is {{ 'accessible' if db_ping.is_available else 'NOT accessible' }}"

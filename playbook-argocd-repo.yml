@@ -1,0 +1,19 @@
+---
+# Add repository credentials to ArgoCD
+# Configures SSH key for private repo access
+#
+# Usage:
+#   export K3S_DROPLET_IP=178.128.121.145
+#   ansible-playbook -i inventory-k8s.yml playbook-argocd-repo.yml
+
+- name: Configure ArgoCD repository credentials
+  hosts: wealthpath-k3s
+  become: true
+
+  vars:
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    github_repo: "git@github.com:wealthpathorganization/wealthpath-k8s.git"
+
+  tasks:
+    - name: Configure repository credentials
+      include_tasks: tasks/argocd-repo-credentials.yml

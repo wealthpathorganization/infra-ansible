@@ -1,0 +1,75 @@
+---
+# k3s Installation Playbook
+# Installs k3s with Traefik and Let's Encrypt
+#
+# Usage:
+#   export K3S_DROPLET_IP=$(terraform -chdir=../infra-terraform/k8s output -raw k3s_public_ip)
+#   ansible-playbook -i inventory-k8s.yml playbook-k3s.yml
+#
+# Prerequisites:
+#   - Droplet provisioned via Terraform
+#   - ansible-galaxy collection install kubernetes.core
+#
+# What this playbook does:
+#   1. Installs k3s (lightweight Kubernetes)
+#   2. Installs Traefik via Helm with Let's Encrypt support
+#   3. Configures automatic HTTP->HTTPS redirect
+#   4. Sets up ACME certificate resolver
+
+- name: Install k3s and Traefik
+  hosts: wealthpath-k3s
+  become: true
+
+  vars:
+    # k3s Configuration
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+
+    # Let's Encrypt Configuration
+    acme_email: "{{ lookup('env', 'ACME_EMAIL') | default('hungnguyen.work.0@gmail.com', true) }}"
+
+  pre_tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - ca-certificates
+          - python3-kubernetes
+          - python3-yaml
+        state: present
+
+  tasks:
+    - name: Install k3s and Traefik
+      include_tasks: tasks/k3s.yml
+
+  post_tasks:
+    - name: Get kubeconfig for local use
+      fetch:
+        src: "{{ kubeconfig_path }}"
+        dest: /tmp/k3s-kubeconfig.yaml
+        flat: yes
+
+    - name: Display summary
+      debug:
+        msg: |
+          =========================================
+          k3s Installation Complete!
+          =========================================
+
+          Kubeconfig copied to: /tmp/k3s-kubeconfig.yaml
+
+          To use locally:
+            export KUBECONFIG=/tmp/k3s-kubeconfig.yaml
+            # Update server address:
+            sed -i '' 's/127.0.0.1/{{ ansible_host }}/g' /tmp/k3s-kubeconfig.yaml
+            kubectl get nodes
+
+          Next steps:
+            1. Run playbook-argocd.yml to install ArgoCD + SealedSecrets
+            2. Set up DNS records
+
+          =========================================

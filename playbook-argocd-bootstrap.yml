@@ -1,0 +1,19 @@
+---
+# ArgoCD Bootstrap Playbook
+# Connects ArgoCD to the wealthpath-k8s repo for GitOps sync
+#
+# Usage:
+#   export K3S_DROPLET_IP=178.128.121.145
+#   ansible-playbook -i inventory-k8s.yml playbook-argocd-bootstrap.yml
+
+- name: Bootstrap ArgoCD with WealthPath Application
+  hosts: wealthpath-k3s
+  become: true
+
+  vars:
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    k8s_repo_path: "/Users/harnguyen/personal/wealthpathorganization/wealthpath-k8s"
+
+  tasks:
+    - name: Bootstrap ArgoCD
+      include_tasks: tasks/argocd-bootstrap.yml

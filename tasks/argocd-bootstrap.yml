@@ -1,0 +1,41 @@
+---
+# Bootstrap ArgoCD with WealthPath Application
+# Applies the AppProject and Application manifests to start GitOps sync
+
+- name: Apply ArgoCD AppProject
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: "{{ lookup('file', k8s_repo_path + '/argocd/project.yaml') | from_yaml }}"
+
+- name: Apply ArgoCD Application
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: "{{ lookup('file', k8s_repo_path + '/argocd/apps/wealthpath.yaml') | from_yaml }}"
+
+- name: Wait for Application to be created
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    name: wealthpath
+    namespace: argocd
+  register: app_status
+  until: app_status.resources | length > 0
+  retries: 10
+  delay: 5
+
+- name: Display ArgoCD Application status
+  debug:
+    msg: |
+      =========================================
+      ArgoCD Application Created!
+
+      Application: wealthpath
+      Repo: https://github.com/wealthpathorganization/wealthpath-k8s.git
+      Path: overlays/production
+
+      ArgoCD will now sync automatically.
+      Check status: argocd app get wealthpath
+      =========================================
