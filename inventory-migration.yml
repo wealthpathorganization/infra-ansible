@@ -1,0 +1,28 @@
+# WealthPath Database Migration Inventory
+# Used for migrating data from OLD single-server to NEW k8s DB droplet
+#
+# Usage:
+#   ansible-playbook -i inventory-migration.yml playbook-migrate-to-k8s-db.yml
+#
+# Required environment variables:
+#   OLD_SERVER_IP  - IP of the original single-server deployment
+#   DB_DROPLET_IP  - IP of the new k8s database droplet (default: 167.71.193.114)
+
+all:
+  hosts:
+    wealthpath_old:
+      ansible_host: "{{ lookup('env', 'OLD_SERVER_IP') }}"
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/wealthpath_key
+      ansible_python_interpreter: /usr/bin/python3
+
+    wealthpath_db_new:
+      ansible_host: "{{ lookup('env', 'DB_DROPLET_IP') | default('167.71.193.114', true) }}"
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      ansible_python_interpreter: /usr/bin/python3
+
+  vars:
+    # PostgreSQL Configuration (same for both servers)
+    postgres_user: wealthpath
+    postgres_db: wealthpath

@@ -1,3 +1,40 @@
+# WealthPath Infrastructure Scripts
+
+This directory contains operational scripts for the WealthPath infrastructure.
+
+## Database Scripts
+
+### backup-db.sh
+Creates PostgreSQL backups with optional upload to DigitalOcean Spaces.
+```bash
+./backup-db.sh [hourly|daily|weekly]
+```
+
+### restore-db.sh
+Restores PostgreSQL from backup (local file or DigitalOcean Spaces).
+```bash
+./restore-db.sh                    # List available backups
+./restore-db.sh latest             # Restore latest daily backup
+./restore-db.sh /path/to/backup.sql.gz
+```
+
+### migrate-to-k8s-db.sh
+Migrates database from OLD single-server to NEW k8s dedicated DB droplet.
+```bash
+export OLD_SERVER_IP=<your-old-server-ip>
+export NEW_DB_SERVER_IP=167.71.193.114  # Default
+./migrate-to-k8s-db.sh
+```
+
+### decommission-old-server.sh
+Safely shuts down services on the old server after migration.
+```bash
+export OLD_SERVER_IP=<your-old-server-ip>
+./decommission-old-server.sh
+```
+
+---
+
 # Pre-Push Checks
 
 This repository includes automated checks that run before pushing to the `main` branch.

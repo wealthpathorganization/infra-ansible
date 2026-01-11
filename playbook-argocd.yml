@@ -6,6 +6,9 @@
 #   export K3S_DROPLET_IP=$(terraform -chdir=../infra-terraform/k8s output -raw k3s_public_ip)
 #   ansible-playbook -i inventory-k8s.yml playbook-argocd.yml
 #
+# With Image Updater git write-back:
+#   ansible-playbook -i inventory-k8s.yml playbook-argocd.yml -e image_updater_git_token=ghp_xxx
+#
 # Prerequisites:
 #   - k3s cluster running (from Terraform)
 #   - ansible-galaxy collection install kubernetes.core
@@ -17,7 +20,8 @@
 #   4. Installs SealedSecrets controller via Helm
 #   5. Installs kubeseal CLI
 #   6. Backs up SealedSecrets private key
-#   7. Outputs initial admin password and access instructions
+#   7. Installs ArgoCD Image Updater for automated image updates
+#   8. Outputs initial admin password and access instructions
 
 - name: Install ArgoCD and SealedSecrets on k3s
   hosts: wealthpath-k3s
@@ -31,6 +35,10 @@
 
     # SealedSecrets Configuration
     sealed_secrets_version: "0.27.2"
+
+    # ArgoCD Image Updater Configuration
+    image_updater_version: "v0.12.2"
+    # image_updater_git_token: Set via -e or environment variable for git write-back
 
     # k3s Configuration
     kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
@@ -52,6 +60,9 @@
 
     - name: Install SealedSecrets
       include_tasks: tasks/sealed-secrets.yml
+
+    - name: Install ArgoCD Image Updater
+      include_tasks: tasks/argocd-image-updater.yml
 
   post_tasks:
     - name: Display summary
@@ -78,4 +89,17 @@
           To seal a secret locally:
             scp root@{{ ansible_host }}:/root/sealed-secrets-pub-cert.pem .
             kubeseal --cert sealed-secrets-pub-cert.pem --format yaml < secret.yaml > sealed-secret.yaml
+
+          ArgoCD Image Updater:
+          - Namespace: argocd-image-updater
+          - Check interval: 5 minutes
+          - Registry: ghcr.io
+          {% if image_updater_git_token is defined and image_updater_git_token | length > 0 %}
+          - Git write-back: Enabled ✓
+          {% else %}
+          - Git write-back: Disabled (run with -e image_updater_git_token=ghp_xxx to enable)
+          {% endif %}
+
+          Image Updater automatically watches GHCR for new images and
+          updates the k8s repo when new tags are pushed.
           =========================================

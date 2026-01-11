@@ -1,0 +1,197 @@
+---
+# Database Migration Playbook - Old Server to K8s DB
+# Migrates PostgreSQL data from original single-server to dedicated k8s DB droplet
+#
+# Usage:
+#   ansible-playbook -i inventory-migration.yml playbook-migrate-to-k8s-db.yml
+#
+# Required environment variables:
+#   OLD_SERVER_IP      - IP of the original single-server deployment
+#   DB_DROPLET_IP      - IP of the new k8s database droplet (167.71.193.114)
+#
+# This playbook:
+#   1. Creates backup on OLD server
+#   2. Transfers backup to NEW DB server
+#   3. Restores backup on NEW DB server
+#   4. Verifies migration success
+
+- name: Phase 1 - Backup OLD Database
+  hosts: wealthpath_old
+  become: yes
+  gather_facts: yes
+
+  vars:
+    postgres_user: wealthpath
+    postgres_db: wealthpath
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    backup_file: "/tmp/migration_{{ backup_timestamp }}.sql.gz"
+
+  tasks:
+    - name: Check if PostgreSQL is running
+      systemd:
+        name: postgresql
+      register: postgres_status
+      failed_when: false
+
+    - name: Fail if PostgreSQL is not running
+      fail:
+        msg: "PostgreSQL is not running on the old server. Cannot create backup."
+      when: postgres_status.status.ActiveState != "active"
+
+    - name: Get current table count
+      become_user: postgres
+      postgresql_query:
+        db: "{{ postgres_db }}"
+        query: "SELECT count(*) as count FROM information_schema.tables WHERE table_schema = 'public'"
+      register: old_table_count
+
+    - name: Display OLD server stats
+      debug:
+        msg: "OLD server has {{ old_table_count.query_result[0].count }} tables"
+
+    - name: Create PostgreSQL backup
+      shell: |
+        sudo -u postgres pg_dump -U {{ postgres_user }} -d {{ postgres_db }} \
+          --clean --if-exists | gzip > {{ backup_file }}
+      args:
+        creates: "{{ backup_file }}"
+
+    - name: Verify backup file exists
+      stat:
+        path: "{{ backup_file }}"
+      register: backup_stat
+
+    - name: Fail if backup is empty
+      fail:
+        msg: "Backup file is empty or does not exist"
+      when: not backup_stat.stat.exists or backup_stat.stat.size == 0
+
+    - name: Verify backup integrity
+      command: gunzip -t {{ backup_file }}
+      changed_when: false
+
+    - name: Get backup file size
+      debug:
+        msg: "Backup created: {{ backup_file }} ({{ backup_stat.stat.size | filesizeformat }})"
+
+    - name: Download backup to controller
+      fetch:
+        src: "{{ backup_file }}"
+        dest: "/tmp/wealthpath_migration/"
+        flat: yes
+
+    - name: Set backup file fact for next play
+      set_fact:
+        migration_backup_file: "{{ backup_file }}"
+        migration_backup_local: "/tmp/wealthpath_migration/{{ backup_file | basename }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+
+- name: Phase 2 - Restore to NEW Database
+  hosts: wealthpath_db_new
+  become: yes
+  gather_facts: yes
+
+  vars:
+    postgres_user: wealthpath
+    postgres_db: wealthpath
+    restore_file: "/tmp/migration_restore.sql.gz"
+
+  tasks:
+    - name: Check if PostgreSQL is running
+      systemd:
+        name: postgresql
+      register: postgres_status
+      failed_when: false
+
+    - name: Fail if PostgreSQL is not running
+      fail:
+        msg: "PostgreSQL is not running on the new DB server. Run playbook-postgresql-k8s.yml first."
+      when: postgres_status.status.ActiveState != "active"
+
+    - name: Upload backup to new server
+      copy:
+        src: "{{ hostvars['localhost']['migration_backup_local'] }}"
+        dest: "{{ restore_file }}"
+        mode: '0600'
+
+    - name: Verify uploaded backup integrity
+      command: gunzip -t {{ restore_file }}
+      changed_when: false
+
+    - name: Restore database from backup
+      shell: |
+        gunzip -c {{ restore_file }} | sudo -u postgres psql -d {{ postgres_db }} -q
+      register: restore_result
+
+    - name: Display restore result
+      debug:
+        msg: "Database restore completed"
+
+    - name: Get NEW server table count
+      become_user: postgres
+      postgresql_query:
+        db: "{{ postgres_db }}"
+        query: "SELECT count(*) as count FROM information_schema.tables WHERE table_schema = 'public'"
+      register: new_table_count
+
+    - name: Display NEW server stats
+      debug:
+        msg: "NEW server now has {{ new_table_count.query_result[0].count }} tables"
+
+    - name: Get row counts for verification
+      become_user: postgres
+      postgresql_query:
+        db: "{{ postgres_db }}"
+        query: |
+          SELECT schemaname, relname as table_name, n_live_tup as row_count
+          FROM pg_stat_user_tables
+          ORDER BY n_live_tup DESC
+          LIMIT 10
+      register: row_counts
+
+    - name: Display sample row counts
+      debug:
+        msg: "{{ item }}"
+      loop: "{{ row_counts.query_result }}"
+
+    - name: Cleanup restore file
+      file:
+        path: "{{ restore_file }}"
+        state: absent
+
+    - name: Cleanup local backup
+      file:
+        path: "/tmp/wealthpath_migration/"
+        state: absent
+      delegate_to: localhost
+
+
+- name: Phase 3 - Migration Summary
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+    - name: Display migration summary
+      debug:
+        msg: |
+
+          ========================================
+          Database Migration Complete!
+          ========================================
+
+          OLD Server: {{ groups['wealthpath_old'][0] }}
+          NEW DB Server: {{ groups['wealthpath_db_new'][0] }}
+
+          Next steps:
+            1. Update application secrets to use new database host
+            2. Deploy/restart application pods in k3s
+            3. Verify application connectivity
+            4. Monitor for issues (24-48 hours)
+            5. Decommission old server when confirmed
+
+          To decommission old server:
+            ./scripts/decommission-old-server.sh
+
+          ========================================
