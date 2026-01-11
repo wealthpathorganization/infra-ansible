@@ -22,7 +22,7 @@ services:
     restart: always
 
   flyway:
-    image: ghcr.io/wealthpathorganization/migrations:latest
+    image: ghcr.io/wealthpathorganization/migrations:${MIGRATIONS_TAG:-latest}
     network_mode: "host"
     environment:
       FLYWAY_URL: jdbc:postgresql://localhost:5432/${POSTGRES_DB:-wealthpath}
@@ -34,7 +34,7 @@ services:
     restart: "no"
 
   backend:
-    image: ghcr.io/wealthpathorganization/backend:latest
+    image: ghcr.io/wealthpathorganization/backend:${BACKEND_TAG:-latest}
     expose:
       - "8080"
     extra_hosts:
@@ -61,7 +61,7 @@ services:
     restart: always
 
   frontend:
-    image: ghcr.io/wealthpathorganization/frontend:latest
+    image: ghcr.io/wealthpathorganization/frontend:${FRONTEND_TAG:-latest}
     expose:
       - "3000"
     environment:

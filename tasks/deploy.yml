@@ -1,23 +1,41 @@
 ---
 # Deployment Tasks
-# Pulls Docker images and starts services
+# Pulls Docker images and starts services using specific image tags
 
-- name: Pull Docker images
+- name: Display image tags being deployed
+  debug:
+    msg: |
+      Deploying with image tags:
+        - Backend: {{ backend_tag }}
+        - Frontend: {{ frontend_tag }}
+        - Migrations: {{ migrations_tag }}
+
+- name: Pull Docker images with specific tags
   shell: |
     cd {{ app_dir }}
-    docker compose -f {{ compose_file }} pull --quiet
+    export BACKEND_TAG={{ backend_tag }}
+    export FRONTEND_TAG={{ frontend_tag }}
+    export MIGRATIONS_TAG={{ migrations_tag }}
+    docker compose -f {{ compose_file }} pull
   async: 600  # 10 minute timeout
   poll: 10
   register: pull_result
-  ignore_errors: yes
 
 - name: Show pull result
   debug:
-    msg: "Image pull {{ 'succeeded' if pull_result.rc == 0 else 'had issues (continuing anyway)' }}"
+    msg: "Image pull {{ 'succeeded' if pull_result.rc == 0 else 'FAILED' }}"
+
+- name: Fail if image pull failed
+  fail:
+    msg: "Failed to pull Docker images. Check if the tags exist: backend={{ backend_tag }}, frontend={{ frontend_tag }}, migrations={{ migrations_tag }}"
+  when: pull_result.rc != 0
 
 - name: Stop and start services atomically
   shell: |
     cd {{ app_dir }}
+    export BACKEND_TAG={{ backend_tag }}
+    export FRONTEND_TAG={{ frontend_tag }}
+    export MIGRATIONS_TAG={{ migrations_tag }}
     # Stop and start in a single command to minimize downtime and connection issues
     docker compose -f {{ compose_file }} down --remove-orphans --timeout 30 && \
     docker compose -f {{ compose_file }} up -d --wait --wait-timeout 120

@@ -46,6 +46,11 @@ all:
     
     # Docker compose file
     compose_file: docker-compose.deploy.yaml
+
+    # Image tags (from CI/CD pipeline, defaults to 'latest')
+    backend_tag: "{{ lookup('env', 'BACKEND_TAG') | default('latest', true) }}"
+    frontend_tag: "{{ lookup('env', 'FRONTEND_TAG') | default('latest', true) }}"
+    migrations_tag: "{{ lookup('env', 'MIGRATIONS_TAG') | default('latest', true) }}"
     
     # Backup configuration (DigitalOcean Spaces)
     do_spaces_key: "{{ lookup('env', 'DO_SPACES_KEY') | default('', true) }}"

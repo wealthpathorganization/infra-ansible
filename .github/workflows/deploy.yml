@@ -1,5 +1,12 @@
 # Deployment Workflow
 # Deploys WealthPath to the server using Ansible
+#
+# Triggered by:
+#   - Push to main branch (infra changes)
+#   - Manual workflow_dispatch
+#   - repository_dispatch from backend/frontend repos (auto-deploy)
+#
+# Concurrency: Only one deployment runs at a time. New triggers queue.
 
 name: Deploy
 
@@ -18,6 +25,11 @@ on:
   repository_dispatch:
     types: [deploy]
 
+# Concurrency control: queue deployments, don't cancel running ones
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 env:
   ANSIBLE_HOST_KEY_CHECKING: 'false'
 
@@ -27,8 +39,21 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Log deployment trigger
+        run: |
+          echo "=== Deployment Triggered ==="
+          echo "Event: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Source: ${{ github.event.client_payload.source }}"
+            echo "SHA: ${{ github.event.client_payload.sha }}"
+            echo "Backend Tag: ${{ github.event.client_payload.backend_tag }}"
+            echo "Frontend Tag: ${{ github.event.client_payload.frontend_tag }}"
+            echo "Migrations Tag: ${{ github.event.client_payload.migrations_tag }}"
+          fi
+          echo "============================"
+
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -60,8 +85,13 @@ jobs:
           DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
           DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
           DO_SPACES_REGION: ${{ secrets.DO_SPACES_REGION }}
+          # Image tags from repository_dispatch (falls back to 'latest' for manual/push triggers)
+          BACKEND_TAG: ${{ github.event.client_payload.backend_tag || 'latest' }}
+          FRONTEND_TAG: ${{ github.event.client_payload.frontend_tag || 'latest' }}
+          MIGRATIONS_TAG: ${{ github.event.client_payload.migrations_tag || 'latest' }}
         run: |
           cd ${{ github.workspace }}
+          echo "Deploying with tags: backend=$BACKEND_TAG, frontend=$FRONTEND_TAG, migrations=$MIGRATIONS_TAG"
           ansible-playbook playbook.yml -v
       
       - name: Cleanup SSH
